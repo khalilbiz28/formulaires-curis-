@@ -1,72 +1,74 @@
 const express = require('express');
-const bodyParser = require('body-parser');
-const axios = require('axios');  // Utilisation d'axios pour les requêtes HTTP
 const https = require('https');
-const helmet = require("helmet");
 const fs = require('fs');
 const path = require('path');
-const form = require('form');
-const formData = require('formData');
-const response = require('response');
-const result = require('');
+const helmet = require('helmet');
+const morgan = require('morgan');
+const multer = require('multer');
+const axios = require('axios');
+
 const app = express();
+const upload = multer();
 
-const RECAPTCHA_SECRET = '6Lez_TYrAAAAAICNMWRPMPAY5puR9JFzQ0l9sffB';  // Remplacer par ta clé secrète reCAPTCHA
+const RECAPTCHA_SECRET = '6Lez_TYrAAAAAICNMWRPMPAY5puR9JFzQ0l9sffB'; // remplace par ta clé secrète
 
-// Middleware pour parser les données du formulaire
-app.use(helmet({contentSecurityPolicy:false}));
-app.use(bodyParser.urlencoded({ extended: true }));
+// Sécurité et logs
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(morgan('combined'));
 
-// Route GET vers index.html
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '../public/index.html'));
-});
+// Servir les fichiers statiques (comme index.html)
+app.use(express.static(path.join(__dirname, '../public')));
 
-// Route POST
-app.post('/submit', async (req, res) => {
+// Route POST avec multer pour FormData
+app.post('/submit', upload.none(), async (req, res) => {
+    console.log('Reçu :', req.body);
+
     const recaptchaToken = req.body['g-recaptcha-response'];
-
     if (!recaptchaToken) {
         return res.status(400).json({ error: "Veuillez valider le reCAPTCHA." });
     }
 
     try {
         const isHuman = await verifyRecaptcha(recaptchaToken);
-        if (!isHuman) {
-            return res.status(400).json({ error: "Échec de la vérification reCAPTCHA." });
+       
+
+        // Simuler le stockage des données
+        const submission = {
+            name: req.body.name,
+            email: req.body.email,
+            message: req.body.message,
+            date: new Date().toISOString()
+        };
+
+        const dataPath = path.join(__dirname, '../data/submissions.json');
+        let existing = [];
+        if (fs.existsSync(dataPath)) {
+            existing = JSON.parse(fs.readFileSync(dataPath));
         }
+        existing.push(submission);
+        fs.writeFileSync(dataPath, JSON.stringify(existing, null, 2));
 
-        // Hashage des données sensibles et enregistrement dans une base ou un fichier
-        // Par exemple, tu peux ajouter un hachage ici pour sécuriser les mots de passe si nécessaire
-
+        console.log('Données enregistrées');
         res.json({ success: "Formulaire envoyé avec succès !" });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "Erreur lors de la vérification reCAPTCHA." });
+        console.error('Erreur serveur:', error);
+        res.status(500).json({ error: "Erreur interne." });
     }
 });
 
 async function verifyRecaptcha(token) {
-    const secret = RECAPTCHA_SECRET;
-    const url = `https://www.google.com/recaptcha/api/siteverify?secret=${secret}&response=${token}`;
-
+    const url = `https://www.google.com/recaptcha/api/siteverify?secret=${RECAPTCHA_SECRET}&response=${token}`;
     try {
         const response = await axios.post(url);
         const data = response.data;
-
-        // Vérification si la réponse est valide
-        if (data.success) {
-            return true;
-        } else {
-            console.error('Erreur reCAPTCHA:', data['error-codes']);
-            return false;
-        }
+        return data.success;
     } catch (error) {
-        console.error('Erreur lors de la requête reCAPTCHA:', error);
-        throw error;
+        console.error('Erreur reCAPTCHA:', error);
+        return false;
     }
 }
 
+// SSL local
 const sslOptions = {
     key: fs.readFileSync(path.join(__dirname, '../config/key.pem')),
     cert: fs.readFileSync(path.join(__dirname, '../config/cert.pem')),
